@@ -171,7 +171,7 @@ class MPEDecoderTab(IMessageEditorTab):
 	mpeMsgDict =  mpeUnpacker._fb_unpack()
 	showMsg = ""
 	try:
-	    showMsg = json.dumps(mpeMsgDict)
+	    showMsg = json.dumps(mpeMsgDict,ensure_ascii=False)
 	except:
 	    showMsg = "json decode failue:\r\n\r\n" + str( mpeMsgDict )
 	
