@@ -1,4 +1,4 @@
-# BurpMessagePackExtention.py
+# Burp-MessagePack
 
 ## Requirement
 
@@ -6,26 +6,10 @@
 
 ## Features
 
-### Decode MessagePack encoded message
+* Decode MessagePack encoded request/response to JSON
+* Encode JSON encoded request to MessagePack
 
-BurpMessagePackExtention decodes MessagePack encoded message to JSON.
-See each http message's "MPack" tab.
+Decode/Encode condition is below.
 
-### Send MessagePack request
-
-1. Add Target Scope from Target tab.
-1. Open MPack tab and check "Enable mod request".
-1. Check burptools you want to use encoding feature.
-1. Move to any http request tab which you want to modify.
-1. Copy "MPack" tab's message(JSON) to Raw tab's body.
-1. Send http request. Extention will encode automatically.
-
-Encode condition is below.
-
-* A message is in target scope.
-* "Enable mod request" checkbox has checked.
-* burptool's checkboxes has checked.
-* Content-Type
- * application/msgpack
- * application/x-msgpack
-* A message body is JSON formatted.
+* A message is in Burp's target scope
+* Content-Type header value is "application/\*msgpack" ("\*" means wild card)
