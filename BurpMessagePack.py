@@ -111,7 +111,7 @@ class HttpListener( IHttpListener, ListenerBase ):
                 return
             rawRequest = httpReqRes.getRequest()
             newRequest = self.toMpack( rawRequest, requestInfo )
-            if None == nwRequest:
+            if None == newRequest:
                 return
             httpReqRes.setRequest( newRequest )
         else:
