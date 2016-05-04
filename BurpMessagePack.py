@@ -94,9 +94,9 @@ class ProxyListener(IProxyListener, ListenerBase):
             responseInfo = self._helpers.analyzeResponse( rawResponse )
             if False == self.isMessagePack( responseInfo.getHeaders() ):
                 return
-            newResponse = self.toJson( rawResponse, responseInfo )
+            newResponse = self.toMpack( rawResponse, responseInfo )
             httpReqRes.setResponse( newResponse )
-	
+
 class HttpListener( IHttpListener, ListenerBase ):
     def __init__( self, extender ):
 	ListenerBase.__init__( self, extender )
@@ -115,13 +115,22 @@ class HttpListener( IHttpListener, ListenerBase ):
                 return
             httpReqRes.setRequest( newRequest )
         else:
-	    if IBurpExtenderCallbacks.TOOL_PROXY == toolFlag:
-                return
-            rawResponse = httpReqRes.getResponse() 
+	    rawResponse = httpReqRes.getResponse() 
             responseInfo = self._helpers.analyzeResponse( rawResponse )
             if False == self.isMessagePack( responseInfo.getHeaders() ):
                 return
-            newResponse = self.toJson( rawResponse, responseInfo )
+            
+            mpackBody = rawResponse[ responseInfo.getBodyOffset() : ].tostring()
+            newBody = self.toJsonBody( mpackBody )
+
+            if IBurpExtenderCallbacks.TOOL_PROXY == toolFlag:
+                # re-encode test
+                try:
+                    self.toMpackBody( newBody )
+                except:
+                    self._callbacks.printError( "A messagepack'ed response re-encode failure: " + newBody )
+                    return
+                
+            newResponse = self.buildHttpMessage( responseInfo, newBody )
             httpReqRes.setResponse( newResponse )
-	
 
