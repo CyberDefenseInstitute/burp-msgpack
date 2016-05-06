@@ -1,30 +1,39 @@
 import msgpack
-import array
 import json
 import re
 from collections import OrderedDict
 from msgpack import Unpacker
 
 from burp import IBurpExtender
-from burp import IBurpExtenderCallbacks
+from burp import IMessageEditorTabFactory
+from burp import IMessageEditorTab
 from burp import IHttpListener
-from burp import IProxyListener
 
-class BurpExtender( IBurpExtender ):
+class BurpExtender( IBurpExtender, IMessageEditorTabFactory ):
 	
     def registerExtenderCallbacks( self, callbacks ):
-	self._callbacks = callbacks
-	self._helpers = callbacks.getHelpers()
+        self._callbacks = callbacks
 	callbacks.setExtensionName( "Burp MessagePack" )
-        callbacks.registerProxyListener( ProxyListener( self ) )
-	callbacks.registerHttpListener( HttpListener( self ) )
+        callbacks.registerMessageEditorTabFactory( self )
+        callbacks.registerHttpListener( HttpListener( callbacks ) )
 
-class ListenerBase:
-    def __init__( self, extender ):
-	self._helpers = extender._helpers
-	self._callbacks = extender._callbacks
+    def createNewInstance( self, controller, editable ):
+        return MessageEditorTab( controller, editable, self._callbacks )
+
+class MpackJsonHelper:
+    def __init__( self, callbacks ):
+        self._callbacks = callbacks
+        self._helpers = callbacks.getHelpers()
         self._mpackPattern = re.compile( "^content-type: .*?application/[^;]*?msgpack", re.IGNORECASE )
         self._jsonPattern = re.compile( "[{\[]" )
+
+    def analyzeMessage( self, content, isRequest ):
+        if isRequest:
+            httpService = self._controller.getHttpService()
+            info = self._helpers.analyzeRequest( httpService, content )
+        else:
+            info = self._helpers.analyzeResponse( content )
+        return info
 
     def isMessagePack( self, headers ):
 	for header in headers:
@@ -39,7 +48,7 @@ class ListenerBase:
     def toJsonBody( self, mpackBody ):
         unpacker = Unpacker( object_pairs_hook=OrderedDict )
         unpacker.feed( mpackBody )
-        bodyMap =  unpacker._fb_unpack()
+        bodyMap =  unpacker.unpack()
         newBody = json.dumps( bodyMap, ensure_ascii=False )
         return newBody
 
@@ -50,8 +59,13 @@ class ListenerBase:
         return newRaw
 
     def toMpackBody( self, body ):
-        jsonBody = json.loads( body, object_pairs_hook=OrderedDict )
-        newBody = msgpack.packb( jsonBody )
+        try:
+            jsonBody = json.loads( body, object_pairs_hook=OrderedDict )
+            newBody = msgpack.packb( jsonBody )
+        except:
+            msg = "toMpackBody failure: " + str(body)
+            self._callbacks.issueAlert( msg )
+            raise Exception( msg )
         return newBody
 
     def toMpack( self, raw, info ):
@@ -62,75 +76,74 @@ class ListenerBase:
         newRaw = self.buildHttpMessage( info, newBody )
         return newRaw
 
-class ProxyListener(IProxyListener, ListenerBase):
-    def __init__(self, extender):
-	ListenerBase.__init__( self, extender )
+class MessageEditorTab( IMessageEditorTab, MpackJsonHelper ):
+    def __init__( self, controller, editable, callbacks ):
+        MpackJsonHelper.__init__( self, callbacks )
+        self._controller = controller
+        self._editable = editable
+        self._editor = self._callbacks.createTextEditor()
+        self._editor.setEditable( editable )
 
-    def processProxyMessage( self, isRequest, proxyMessage ):
-        httpReqRes = proxyMessage.getMessageInfo()
-        requestInfo = self._helpers.analyzeRequest( httpReqRes )
-        if False == self._callbacks.isInScope( requestInfo.getUrl() ):
-            return
- 	
-        if isRequest:
-            if False == self.isMessagePack( requestInfo.getHeaders() ):
-                return
-            rawRequest = httpReqRes.getRequest()
-            mpackBody = rawRequest[ requestInfo.getBodyOffset() : ].tostring()
-            newBody = self.toJsonBody( mpackBody )
-            
-            # re-encode test
-            try:
-                self.toMpackBody( newBody )
-            except:
-                # If this test is failed, following HttpListener.processHttpMessage always fail.
-                # So, we can't modify http message.
-                self._callbacks.printError( "A messagepack'ed request re-encode failure: " + newBody )
-                return
-            newRequest = self.buildHttpMessage( requestInfo, newBody )
-            httpReqRes.setRequest( newRequest )
-        else:
-            rawResponse = httpReqRes.getResponse() 
-            responseInfo = self._helpers.analyzeResponse( rawResponse )
-            if False == self.isMessagePack( responseInfo.getHeaders() ):
-                return
-            newResponse = self.toMpack( rawResponse, responseInfo )
-            httpReqRes.setResponse( newResponse )
+    def getTabCaption( self ):
+        return "mpack"
 
-class HttpListener( IHttpListener, ListenerBase ):
-    def __init__( self, extender ):
-	ListenerBase.__init__( self, extender )
+    def getUiComponent( self ):
+        return self._editor.getComponent()
+
+    def isEnabled( self, content, isRequest ):
+        if content is None:
+            return False
+
+        info = self.analyzeMessage( content, isRequest )
+        isMessagePack = self.isMessagePack( info.getHeaders() )
+        return isMessagePack
+
+    def setMessage( self, content, isRequest ):
+        info = self.analyzeMessage( content, isRequest )
+        newRaw = self.toJson( content, info )
+        self._editor.setText( newRaw )
+        self._content = content
+        self._isRequest = isRequest
+
+    def getMessage( self ):
+        content = self._editor.getText()
+        info = self.analyzeMessage( content, self._isRequest )
+        try:
+            newContent = self.toMpack( content, info )
+        except:
+            return self._content
+        return newContent
+
+    def isModified( self ):
+        return self._editor.isTextModified()
+
+    def getSelectedData( self ):
+        selected = self._editor.getSelectedText()
+        return selected
+
+class HttpListener( IHttpListener, MpackJsonHelper ):
+    def __init__( self, callbacks ):
+        MpackJsonHelper.__init__( self, callbacks )
+        self._toolMask = self._callbacks.TOOL_SCANNER | \
+            self._callbacks.TOOL_INTRUDER | \
+            self._callbacks.TOOL_EXTENDER
 
     def processHttpMessage( self, toolFlag, isRequest, httpReqRes ):
+        if False == isRequest:
+            return
+        if 0 == ( self._toolMask & toolFlag ):
+            return
         requestInfo = self._helpers.analyzeRequest( httpReqRes )
         if False == self._callbacks.isInScope( requestInfo.getUrl() ):
             return
-        
-        if isRequest:
-            if False == self.isMessagePack( requestInfo.getHeaders() ):
-                return
-            rawRequest = httpReqRes.getRequest()
+        if False == self.isMessagePack( requestInfo.getHeaders() ):
+            return
+
+        rawRequest = httpReqRes.getRequest()
+        try:
             newRequest = self.toMpack( rawRequest, requestInfo )
             if None == newRequest:
                 return
-            httpReqRes.setRequest( newRequest )
-        else:
-	    rawResponse = httpReqRes.getResponse() 
-            responseInfo = self._helpers.analyzeResponse( rawResponse )
-            if False == self.isMessagePack( responseInfo.getHeaders() ):
-                return
-            
-            mpackBody = rawResponse[ responseInfo.getBodyOffset() : ].tostring()
-            newBody = self.toJsonBody( mpackBody )
-
-            if IBurpExtenderCallbacks.TOOL_PROXY == toolFlag:
-                # re-encode test
-                try:
-                    self.toMpackBody( newBody )
-                except:
-                    self._callbacks.printError( "A messagepack'ed response re-encode failure: " + newBody )
-                    return
-                
-            newResponse = self.buildHttpMessage( responseInfo, newBody )
-            httpReqRes.setResponse( newResponse )
-
+        except:
+            return
+        httpReqRes.setRequest( newRequest )
