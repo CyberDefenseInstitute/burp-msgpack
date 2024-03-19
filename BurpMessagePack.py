@@ -13,7 +13,7 @@ class BurpExtender( IBurpExtender, IMessageEditorTabFactory ):
 	
     def registerExtenderCallbacks( self, callbacks ):
         self._callbacks = callbacks
-	callbacks.setExtensionName( "Burp MessagePack" )
+        callbacks.setExtensionName( "Burp MessagePack" )
         callbacks.registerMessageEditorTabFactory( self )
         callbacks.registerHttpListener( HttpListener( callbacks ) )
 
@@ -36,10 +36,10 @@ class MpackJsonHelper:
         return info
 
     def isMessagePack( self, headers ):
-	for header in headers:
-	    if None != self._mpackPattern.match( header ):
+        for header in headers:
+            if None != self._mpackPattern.match( header ):
                 return True
-	return False
+        return False
 
     def buildHttpMessage( self, info, newBody ):
         newRaw = self._helpers.buildHttpMessage( info.getHeaders(), self._helpers.stringToBytes( newBody ))
